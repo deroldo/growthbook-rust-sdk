@@ -13,12 +13,26 @@ Initializing SDK
 
 ```rust
 let gb_url = "HTTP_OR_HTTPS_URL";
-let timeout = Duration::from_millis(500);
-let cache_ttl = Duration::from_secs(300); // 5 minutes
-let gb = Growthbook::new(gb_url, timeout, cache_ttl)?;
+let sdk_key = "SDK_KEY";
+let gb = GrowthBookClient::new(gb_url, sdk_key, None, None)?;
 
-let sdk_key = "SDK_KEY"; // will be used by features
 ```
+
+# Configuration
+
+The lib is configurable via environment variables as following:
+
+| env var                | required | description                                                                    |
+|------------------------|----------|--------------------------------------------------------------------------------|
+| GB_HTTP_CLIENT_TIMEOUT | false    | Timeout from gb client to wait a response from gb server. Default value is 10s |
+| GB_UPDATE_INTERVAL     | false    | Interval to fetch features data from gb server. Default value is 60s           |
+| GB_URL                 | false    | URL from gb server                                                             |
+| GB_SDK_KEY             | false    | SDK key to get features from gb server                                         |
+
+
+# Examples
+
+- Check the [client][examples/client/src/main.rs] folder for a complete example using the SDK.
 
 ### Boolean feature
 ```rust
@@ -36,7 +50,6 @@ let default_feature_value = false;
 let attributes: HashMap<String, Vec<String>> = HashMap::new();
 
 let flag: BooleanFlag = gb.is_on(
-    sdk_key,
     feature_name, 
     default_feature_value,
     Some(attributes),
@@ -60,7 +73,6 @@ let default_feature_value = "default-string";
 let attributes: HashMap<String, Vec<String>> = HashMap::new();
 
 let flag: StringFlag = gb.get_string_value(
-    sdk_key,
     feature_name,
     default_feature_value, 
     Some(attributes),
@@ -86,7 +98,6 @@ let default_feature_value = json!({
 let attributes: HashMap<String, Vec<String>> = HashMap::new();
 
 let flag: StructFlag = gb.get_object_value(
-    sdk_key,
     feature_name,
     default_feature_value, 
     Some(attributes),
