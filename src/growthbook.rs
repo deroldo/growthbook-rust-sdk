@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde_json::Value;
 use tracing::{error, info};
@@ -12,9 +13,13 @@ pub struct Growthbook {
 }
 
 impl Growthbook {
-    pub fn new(url: &str) -> Result<Self, GrowthbookError> {
+    pub fn new(
+        url: &str,
+        timeout_duration: Duration,
+        cache_duration: Duration,
+    ) -> Result<Self, GrowthbookError> {
         Ok(Self {
-            gateway: GrowthbookGateway::new(url)?,
+            gateway: GrowthbookGateway::new(url, timeout_duration, cache_duration)?,
         })
     }
 
