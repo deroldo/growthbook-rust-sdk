@@ -1,51 +1,179 @@
 use serde_json::Value;
 
-use crate::error::{GrowthbookError, GrowthbookErrorCode};
+use crate::model_public::{GrowthBookAttribute, GrowthBookAttributeValue};
 
-pub trait ConvertToUsize {
-    fn convert_to_usize(&self) -> Result<usize, GrowthbookError>;
+pub trait FindGrowthBookAttribute {
+    fn find_value(
+        &self,
+        attribute_key: &str,
+    ) -> Option<GrowthBookAttributeValue>;
 }
 
-pub trait ConvertToString {
-    fn convert_to_string(&self) -> Result<String, GrowthbookError>;
+pub trait JsonHelper {
+    fn get_value(
+        &self,
+        name: &str,
+        default: Value,
+    ) -> Value;
+    fn get_bool(
+        &self,
+        name: &str,
+        default: bool,
+    ) -> bool;
+    fn get_string(
+        &self,
+        name: &str,
+        default: &str,
+    ) -> String;
+    fn get_array(
+        &self,
+        name: &str,
+        default: Vec<Value>,
+    ) -> Vec<Value>;
+
+    fn force_string(
+        &self,
+        default: &str,
+    ) -> String;
+    fn force_i64(
+        &self,
+        default: i64,
+    ) -> i64;
+    fn force_f32(
+        &self,
+        default: f32,
+    ) -> f32;
+    fn force_f64(
+        &self,
+        default: f64,
+    ) -> f64;
+    fn force_bool(
+        &self,
+        default: bool,
+    ) -> bool;
+    fn force_array(
+        &self,
+        default: Vec<Value>,
+    ) -> Vec<Value>;
 }
 
-pub trait FoldVecString {
-    fn fold_to_string(&self) -> String;
-}
+impl JsonHelper for Value {
+    fn get_value(
+        &self,
+        name: &str,
+        default: Value,
+    ) -> Value {
+        self.get(name).unwrap_or(&default).clone()
+    }
 
-impl ConvertToUsize for String {
-    fn convert_to_usize(&self) -> Result<usize, GrowthbookError> {
-        self.replace('.', "")
-            .parse::<usize>()
-            .map_err(GrowthbookError::from)
+    fn get_bool(
+        &self,
+        name: &str,
+        default: bool,
+    ) -> bool {
+        self.get_value(name, Value::Bool(default)).force_bool(default)
+    }
+
+    fn get_string(
+        &self,
+        name: &str,
+        default: &str,
+    ) -> String {
+        self.get_value(name, Value::String(String::from(default))).force_string(default)
+    }
+
+    fn get_array(
+        &self,
+        name: &str,
+        default: Vec<Value>,
+    ) -> Vec<Value> {
+        self.get(name).unwrap_or(&Value::Null).force_array(default)
+    }
+
+    fn force_string(
+        &self,
+        default: &str,
+    ) -> String {
+        if self.is_string() {
+            self.as_str().unwrap_or(default).to_string()
+        } else {
+            self.to_string()
+        }
+    }
+
+    fn force_i64(
+        &self,
+        default: i64,
+    ) -> i64 {
+        self.as_i64().unwrap_or(default)
+    }
+
+    fn force_f32(
+        &self,
+        default: f32,
+    ) -> f32 {
+        self.force_f64(default as f64) as f32
+    }
+
+    fn force_f64(
+        &self,
+        default: f64,
+    ) -> f64 {
+        self.as_f64().unwrap_or(default)
+    }
+
+    fn force_bool(
+        &self,
+        default: bool,
+    ) -> bool {
+        self.as_bool().unwrap_or(default)
+    }
+
+    fn force_array(
+        &self,
+        default: Vec<Value>,
+    ) -> Vec<Value> {
+        self.as_array().unwrap_or(&default).clone()
     }
 }
 
-impl ConvertToUsize for Value {
-    fn convert_to_usize(&self) -> Result<usize, GrowthbookError> {
-        let string = self.convert_to_string()?.replace('.', "");
-        string.parse().map_err(GrowthbookError::from)
+impl FindGrowthBookAttribute for Vec<GrowthBookAttribute> {
+    fn find_value(
+        &self,
+        attribute_key: &str,
+    ) -> Option<GrowthBookAttributeValue> {
+        look_for_attribute(0, attribute_key, self).map(|it| it.value)
     }
 }
 
-impl ConvertToString for Value {
-    fn convert_to_string(&self) -> Result<String, GrowthbookError> {
-        self.as_str().map(String::from).ok_or(GrowthbookError::new(
-            GrowthbookErrorCode::SerdeDeserialize,
-            &format!("Failed to convert value={self} to str"),
-        ))
+impl FindGrowthBookAttribute for &[GrowthBookAttribute] {
+    fn find_value(
+        &self,
+        attribute_key: &str,
+    ) -> Option<GrowthBookAttributeValue> {
+        look_for_attribute(0, attribute_key, self).map(|it| it.value)
     }
 }
 
-impl FoldVecString for Vec<String> {
-    fn fold_to_string(&self) -> String {
-        self.iter().fold(String::new(), |s1, s2| s1 + s2)
-    }
-}
-
-impl ConvertToUsize for Vec<String> {
-    fn convert_to_usize(&self) -> Result<usize, GrowthbookError> {
-        self.fold_to_string().convert_to_usize()
+fn look_for_attribute(
+    split_index: usize,
+    attribute_key: &str,
+    user_attributes: &[GrowthBookAttribute],
+) -> Option<GrowthBookAttribute> {
+    let split = attribute_key.split('.').collect::<Vec<&str>>();
+    let key_part = split[split_index];
+    let option_attribute = user_attributes.iter().find(|item| item.key == key_part);
+    if let Some(found_attribute) = option_attribute {
+        if split.len().gt(&(split_index + 1)) {
+            match found_attribute.value.clone() {
+                GrowthBookAttributeValue::Object(it) => look_for_attribute(split_index + 1, attribute_key, &it),
+                GrowthBookAttributeValue::Empty => None,
+                _ => Some(found_attribute.clone()),
+            }
+        } else {
+            Some(found_attribute.clone())
+        }
+    } else {
+        None
     }
 }

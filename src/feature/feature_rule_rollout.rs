@@ -1,44 +1,43 @@
-use std::collections::HashMap;
+use crate::condition::use_case::ConditionsMatchesAttributes;
+use crate::coverage::model::Coverage;
+use crate::dto::GrowthBookFeatureRuleRollout;
+use crate::extensions::FindGrowthBookAttribute;
+use crate::model_private::FeatureResult;
+use crate::model_public::GrowthBookAttribute;
 
-use serde_json::Value;
-
-use crate::dto::FeatureRuleRollout;
-use crate::extensions::FoldVecString;
-use crate::feature::condition::ConditionEnabledCheck;
-use crate::hash::{HashCode, HashCodeVersion};
-
-impl FeatureRuleRollout {
+impl GrowthBookFeatureRuleRollout {
     pub fn get_match_value(
         &self,
         feature_name: &str,
-        user_attributes: Option<&HashMap<String, Vec<String>>>,
-    ) -> Option<Value> {
-        if let Some(conditions) = &self.condition {
-            if conditions.is_on(user_attributes) {
-                if let Some(attributes) = user_attributes {
-                    if let Some(attribute) = attributes.get(&self.hash_attribute) {
-                        return self.check_coverage(attribute, feature_name);
-                    }
-                }
+        user_attributes: &Vec<GrowthBookAttribute>,
+    ) -> Option<FeatureResult> {
+        if let Some(feature_attributes) = &self.conditions() {
+            if feature_attributes.matches(user_attributes) {
+                self.check_coverage(feature_name, user_attributes)
+            } else {
+                None
             }
-        } else if let Some(attributes) = user_attributes {
-            if let Some(attribute) = attributes.get(&self.hash_attribute) {
-                return self.check_coverage(attribute, feature_name);
+        } else {
+            self.check_coverage(feature_name, user_attributes)
+        }
+    }
+
+    fn check_coverage(
+        &self,
+        feature_name: &str,
+        user_attributes: &Vec<GrowthBookAttribute>,
+    ) -> Option<FeatureResult> {
+        if let Some(hash_attribute) = &self.hash_attribute {
+            if let Some(user_value) = user_attributes.find_value(hash_attribute) {
+                return Coverage::check(&user_value, Some(self.coverage), self.range(), feature_name, self.hash_version, self.force.clone());
             }
+        }
+
+        let fallback_attribute = self.get_fallback_attribute();
+        if let Some(user_value) = user_attributes.find_value(&fallback_attribute) {
+            return Coverage::check(&user_value, Some(self.coverage), self.range(), feature_name, self.hash_version, self.force.clone());
         }
 
         None
-    }
-
-    fn check_coverage(&self, attribute: &Vec<String>, feature_name: &str) -> Option<Value> {
-        if self.coverage.gt(&HashCode::hash_code(
-            &attribute.fold_to_string(),
-            feature_name,
-            HashCodeVersion::V1,
-        )) {
-            Some(self.force.clone())
-        } else {
-            None
-        }
     }
 }

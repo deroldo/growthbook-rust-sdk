@@ -1,42 +1,40 @@
-use crate::env::Environment;
-use crate::error::GrowthbookError;
-use crate::gateway::GrowthbookGateway;
-use crate::growthbook::Growthbook;
-use crate::model::{BooleanFlag, Flag, ObjectFlag, StringFlag};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::error;
+
+use crate::env::Environment;
+use crate::error::GrowthbookError;
+use crate::gateway::GrowthbookGateway;
+use crate::growthbook::GrowthBook;
+use crate::model_private::FeatureResult;
+use crate::model_public::GrowthBookAttribute;
 
 #[derive(Clone)]
 pub struct GrowthBookClient {
-    pub gb: Arc<RwLock<Growthbook>>,
+    pub gb: Arc<RwLock<GrowthBook>>,
 }
 
 async fn updated_features_task(
     growthbook_gateway: GrowthbookGateway,
-    config: Arc<RwLock<Growthbook>>,
+    config: Arc<RwLock<GrowthBook>>,
     interval: Duration,
 ) {
     loop {
         match growthbook_gateway.get_features(None).await {
             Ok(new_config) => {
-                let mut writable_config =
-                    config.write().expect("problem to create mutex for gb data");
-                let updated_features = Growthbook {
+                let mut writable_config = config.write().expect("problem to create mutex for gb data");
+                let updated_features = GrowthBook {
+                    forced_variations: new_config.forced_variations,
                     features: new_config.features,
                 };
                 *writable_config = updated_features;
-                info!("[growthbook-sdk] features from growthbook was updated.");
-            }
+            },
             Err(e) => {
-                error!(
-                    "[growthbook-sdk] Failed to fetch features from server: {:?}",
-                    e
-                );
-            }
+                error!("[growthbook-sdk] Failed to fetch features from server: {:?}", e);
+            },
         }
         sleep(interval).await;
     }
@@ -59,7 +57,8 @@ impl GrowthBookClient {
         });
         let gb_gateway = GrowthbookGateway::new(api_url, sdk_key, default_timeout)?;
         let resp = gb_gateway.get_features(None).await?;
-        let growthbook_writable = Arc::new(RwLock::new(Growthbook {
+        let growthbook_writable = Arc::new(RwLock::new(GrowthBook {
+            forced_variations: resp.forced_variations,
             features: resp.features,
         }));
         let gb_rw_clone = Arc::clone(&growthbook_writable);
@@ -68,59 +67,31 @@ impl GrowthBookClient {
             updated_features_task(gb_gateway, gb_rw_clone, default_interval).await;
         });
 
-        Ok(GrowthBookClient {
-            gb: growthbook_writable,
-        })
+        Ok(GrowthBookClient { gb: growthbook_writable })
     }
 
     pub fn is_on(
         &self,
         feature_name: &str,
-        default_response: bool,
-        user_attributes: Option<&HashMap<String, Vec<String>>>,
-    ) -> Result<BooleanFlag, GrowthbookError> {
-        let flag =
-            self.read_gb()
-                .check(feature_name, Value::Bool(default_response), user_attributes);
-
-        match flag {
-            Flag::Boolean(it) => Ok(it),
-            it => Err(GrowthbookError::invalid_response_value_type(it, "boolean")),
-        }
+        user_attributes: Option<Vec<GrowthBookAttribute>>,
+    ) -> bool {
+        self.read_gb().check(feature_name, &user_attributes).on
     }
 
-    pub fn get_string_value(
+    pub fn is_off(
         &self,
         feature_name: &str,
-        default_response: &str,
-        user_attributes: Option<&HashMap<String, Vec<String>>>,
-    ) -> Result<StringFlag, GrowthbookError> {
-        let flag = self.read_gb().check(
-            feature_name,
-            Value::String(String::from(default_response)),
-            user_attributes,
-        );
-
-        match flag {
-            Flag::String(it) => Ok(it),
-            it => Err(GrowthbookError::invalid_response_value_type(it, "String")),
-        }
+        user_attributes: Option<Vec<GrowthBookAttribute>>,
+    ) -> bool {
+        self.read_gb().check(feature_name, &user_attributes).off
     }
 
-    pub fn get_object_value(
+    pub fn feature_result(
         &self,
         feature_name: &str,
-        default_response: &Value,
-        user_attributes: Option<&HashMap<String, Vec<String>>>,
-    ) -> Result<ObjectFlag, GrowthbookError> {
-        let flag = self
-            .read_gb()
-            .check(feature_name, default_response.clone(), user_attributes);
-
-        match flag {
-            Flag::Object(it) => Ok(it),
-            it => Err(GrowthbookError::invalid_response_value_type(it, "Object")),
-        }
+        user_attributes: Option<Vec<GrowthBookAttribute>>,
+    ) -> FeatureResult {
+        self.read_gb().check(feature_name, &user_attributes)
     }
 
     pub fn total_features(&self) -> usize {
@@ -128,21 +99,16 @@ impl GrowthBookClient {
         gb_data.features.len()
     }
 
-    fn read_gb(&self) -> Growthbook {
+    fn read_gb(&self) -> GrowthBook {
         match self.gb.read() {
             Ok(rw_read_guard) => (*rw_read_guard).clone(),
             Err(e) => {
-                error!(
-                    "{}",
-                    format!(
-                        "[growthbook-sdk] problem to reading gb mutex data returning empty {:?}",
-                        e
-                    )
-                );
-                Growthbook {
+                error!("{}", format!("[growthbook-sdk] problem to reading gb mutex data returning empty {:?}", e));
+                GrowthBook {
+                    forced_variations: None,
                     features: HashMap::new(),
                 }
-            }
+            },
         }
     }
 }

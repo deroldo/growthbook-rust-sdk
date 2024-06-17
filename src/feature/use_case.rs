@@ -1,53 +1,68 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
-use tracing::info;
+use crate::dto::{GrowthBookFeature, GrowthBookFeatureRule};
+use crate::model_private::FeatureResult;
+use crate::model_public::GrowthBookAttribute;
 
-use crate::dto::{Feature, FeatureRule};
-
-impl Feature {
+impl GrowthBookFeature {
     pub fn get_value(
         &self,
         feature_name: &str,
-        user_attributes: Option<&HashMap<String, Vec<String>>>,
-    ) -> (Value, Option<String>) {
+        feature_name_decorate: Vec<String>,
+        user_attributes: &Vec<GrowthBookAttribute>,
+        forced_variations: &Option<HashMap<String, i64>>,
+        all_features: HashMap<String, GrowthBookFeature>,
+    ) -> FeatureResult {
         if let Some(rules) = &self.rules {
             for rule in rules {
                 match rule {
-                    FeatureRule::Force(it) => {
-                        if let Some(value) = it.get_match_value(user_attributes) {
-                            info!(
-                                "Feature {feature_name} value={} for forced rule",
-                                self.default_value
-                            );
-                            return (value, None);
+                    GrowthBookFeatureRule::Force(it) => {
+                        if let Some(feature) = it.get_match_value(feature_name, user_attributes) {
+                            return feature;
                         }
-                    }
-                    FeatureRule::Rollout(it) => {
-                        if let Some(value) = it.get_match_value(feature_name, user_attributes) {
-                            info!(
-                                "Feature {feature_name} value={} for rollout",
-                                self.default_value
-                            );
-                            return (value, None);
+                    },
+                    GrowthBookFeatureRule::Rollout(it) => {
+                        if let Some(feature) = it.get_match_value(feature_name, user_attributes) {
+                            return feature;
                         }
-                    }
-                    FeatureRule::Experiment(it) => {
-                        if let Some((value, experiment_key)) =
-                            it.get_match_value(feature_name, user_attributes)
-                        {
-                            info!(
-                                "Feature {feature_name} value={} for experiment",
-                                self.default_value
-                            );
-                            return (value, Some(experiment_key));
+                    },
+                    GrowthBookFeatureRule::Experiment(it) => {
+                        if let Some(feature) = it.get_match_value(feature_name, user_attributes, forced_variations) {
+                            return feature;
                         }
-                    }
+                    },
+                    GrowthBookFeatureRule::Parent(it) => {
+                        for parent in &it.parent_conditions {
+                            let parent_feature_name = &parent.id;
+                            if feature_name_decorate.contains(parent_feature_name) {
+                                return FeatureResult::cyclic_prerequisite();
+                            }
+
+                            let mut updated_decorate = feature_name_decorate.clone();
+                            updated_decorate.push(String::from(feature_name));
+
+                            let parent_response = if let Some(parent_feature) = all_features.get(parent_feature_name) {
+                                parent_feature.get_value(parent_feature_name, updated_decorate, user_attributes, forced_variations, all_features.clone())
+                            } else {
+                                FeatureResult::unknown_feature()
+                            };
+
+                            if parent_response.source == "cyclicPrerequisite" {
+                                return FeatureResult::cyclic_prerequisite();
+                            }
+
+                            if !parent.is_met(parent_response) {
+                                return FeatureResult::prerequisite();
+                            }
+                        }
+                    },
+                    GrowthBookFeatureRule::Empty(_) => {
+                        continue;
+                    },
                 }
             }
         }
 
-        info!("Feature {feature_name} value={}", self.default_value);
-        (self.default_value.clone(), None)
+        FeatureResult::from_default_value(self.default_value.clone())
     }
 }

@@ -1,12 +1,10 @@
-use chrono::OutOfRangeError;
 use std::env::VarError;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::num::ParseIntError;
 
+use chrono::OutOfRangeError;
 use reqwest::Response;
-
-use crate::model::Flag;
 
 #[derive(Debug)]
 pub enum GrowthbookErrorCode {
@@ -18,6 +16,7 @@ pub enum GrowthbookErrorCode {
     GrowthbookGateway,
     GrowthbookGatewayDeserialize,
     InvalidResponseValueType,
+    GrowthBookAttributeIsNotObject,
 }
 
 #[derive(Debug)]
@@ -27,40 +26,25 @@ pub struct GrowthbookError {
 }
 
 impl GrowthbookError {
-    pub fn new(code: GrowthbookErrorCode, message: &str) -> Self {
-        GrowthbookError {
-            code,
-            message: String::from(message),
-        }
-    }
-
-    pub fn invalid_response_value_type(flag: Flag, expected_type: &str) -> Self {
-        let value = match flag {
-            Flag::Boolean(it) => it.enabled.to_string(),
-            Flag::String(it) => it.value,
-            Flag::Object(it) => it
-                .value::<String>()
-                .unwrap_or(String::from("'ObjectFlag unknown value'")),
-            Flag::Invalid() => String::from("'INVALID TYPE'"),
-        };
-
-        GrowthbookError {
-            code: GrowthbookErrorCode::InvalidResponseValueType,
-            message: format!("Invalid value={value} for expected type={expected_type}"),
-        }
+    pub fn new(
+        code: GrowthbookErrorCode,
+        message: &str,
+    ) -> Self {
+        GrowthbookError { code, message: String::from(message) }
     }
 }
 
 impl Display for GrowthbookError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(
+        &self,
+        f: &mut Formatter<'_>,
+    ) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
 impl Error for GrowthbookError {
-    fn description(&self) -> &str {
-        &self.message
-    }
+    fn description(&self) -> &str { &self.message }
 }
 
 impl From<Box<dyn Error>> for GrowthbookError {
